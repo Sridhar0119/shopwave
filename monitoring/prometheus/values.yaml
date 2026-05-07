@@ -1,0 +1,25 @@
+# monitoring/prometheus/values.yaml
+# Deploy: helm install monitoring prometheus-community/kube-prometheus-stack \
+#   -n monitoring --create-namespace -f monitoring/prometheus/values.yaml
+
+grafana:
+  enabled: true
+  adminPassword: "shopwave-admin"
+  service: { type: LoadBalancer }
+
+prometheus:
+  prometheusSpec:
+    retention: 15d
+    additionalScrapeConfigs:
+      - job_name: shopwave-services
+        static_configs:
+          - targets:
+              - auth-service.shopwave.svc.cluster.local:3001
+              - product-service.shopwave.svc.cluster.local:3002
+              - order-service.shopwave.svc.cluster.local:3003
+              - payment-service.shopwave.svc.cluster.local:3004
+              - notification-service.shopwave.svc.cluster.local:3005
+
+alertmanager: { enabled: true }
+nodeExporter: { enabled: true }
+kubeStateMetrics: { enabled: true }

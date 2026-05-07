@@ -1,0 +1,50 @@
+# Node
+node_modules/
+npm-debug.log*
+.npm
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+dist/
+.pytest_cache/
+
+# Go
+*.exe
+*.test
+vendor/
+
+# Terraform
+**/.terraform/
+*.tfstate
+*.tfstate.backup
+*.tfplan
+.terraform.lock.hcl
+*.tfvars
+
+# Docker
+.dockerignore
+
+# IDE
+.vscode/
+.idea/
+*.swp
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Secrets
+*.pem
+*.key
+.env
+.env.*
+!.env.example
+secrets/
+
+# Build
+build/
+dist/
+coverage/

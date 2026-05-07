@@ -1,0 +1,193 @@
+version: '3.8'
+
+services:
+
+  # ════════════════════════════════════════
+  #  DATABASES
+  # ════════════════════════════════════════
+
+  auth-db:
+    image: postgres:15-alpine
+    environment:
+      POSTGRES_DB:       authdb
+      POSTGRES_USER:     postgres
+      POSTGRES_PASSWORD: password
+    volumes:
+      - auth_data:/var/lib/postgresql/data
+    ports: ["5432:5432"]
+    healthcheck:
+      test: ["CMD-SHELL","pg_isready -U postgres"]
+      interval: 10s
+      timeout:  5s
+      retries:  5
+    restart: unless-stopped
+
+  orders-db:
+    image: postgres:15-alpine
+    environment:
+      POSTGRES_DB:       ordersdb
+      POSTGRES_USER:     postgres
+      POSTGRES_PASSWORD: password
+    volumes:
+      - orders_data:/var/lib/postgresql/data
+    ports: ["5433:5432"]
+    healthcheck:
+      test: ["CMD-SHELL","pg_isready -U postgres"]
+      interval: 10s
+      timeout:  5s
+      retries:  5
+    restart: unless-stopped
+
+  payments-db:
+    image: postgres:15-alpine
+    environment:
+      POSTGRES_DB:       paymentsdb
+      POSTGRES_USER:     postgres
+      POSTGRES_PASSWORD: password
+    volumes:
+      - payments_data:/var/lib/postgresql/data
+    ports: ["5434:5432"]
+    healthcheck:
+      test: ["CMD-SHELL","pg_isready -U postgres"]
+      interval: 10s
+      timeout:  5s
+      retries:  5
+    restart: unless-stopped
+
+  mongodb:
+    image: mongo:7-jammy
+    environment:
+      MONGO_INITDB_DATABASE: productsdb
+    volumes:
+      - mongo_data:/data/db
+    ports: ["27017:27017"]
+    healthcheck:
+      test: ["CMD","mongosh","--eval","db.adminCommand('ping')"]
+      interval: 15s
+      timeout:  5s
+      retries:  5
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    command: redis-server --maxmemory 256mb --maxmemory-policy allkeys-lru --appendonly yes
+    volumes:
+      - redis_data:/data
+    ports: ["6379:6379"]
+    healthcheck:
+      test: ["CMD","redis-cli","ping"]
+      interval: 10s
+      timeout:  5s
+      retries:  5
+    restart: unless-stopped
+
+  # ════════════════════════════════════════
+  #  MICROSERVICES
+  # ════════════════════════════════════════
+
+  auth-service:
+    build: ./services/auth-service
+    environment:
+      DB_HOST:     auth-db
+      DB_PORT:     5432
+      DB_NAME:     authdb
+      DB_USER:     postgres
+      DB_PASSWORD: password
+      REDIS_URL:   redis://redis:6379
+      JWT_SECRET:  shopwave-super-secret-jwt-key-2024
+      PORT:        3001
+    ports: ["3001:3001"]
+    depends_on:
+      - auth-db
+      - redis
+    restart: on-failure
+
+  product-service:
+    build: ./services/product-service
+    environment:
+      MONGO_URI:  mongodb://mongodb:27017
+      DB_NAME:    productsdb
+      REDIS_URL:  redis://redis:6379
+      PORT:       3002
+    ports: ["3002:3002"]
+    depends_on:
+      - mongodb
+      - redis
+    restart: on-failure
+
+  order-service:
+    build: ./services/order-service
+    environment:
+      DB_HOST:     orders-db
+      DB_PORT:     5432
+      DB_NAME:     ordersdb
+      DB_USER:     postgres
+      DB_PASSWORD: password
+      PORT:        3003
+    ports: ["3003:3003"]
+    depends_on:
+      - orders-db
+    restart: on-failure
+
+  payment-service:
+    build: ./services/payment-service
+    environment:
+      DB_HOST:     payments-db
+      DB_PORT:     5432
+      DB_NAME:     paymentsdb
+      DB_USER:     postgres
+      DB_PASSWORD: password
+      REDIS_URL:   redis://redis:6379
+      PORT:        3004
+    ports: ["3004:3004"]
+    depends_on:
+      - payments-db
+      - redis
+    restart: on-failure
+
+  notification-service:
+    build: ./services/notification-service
+    environment:
+      MONGO_URI:  mongodb://mongodb:27017
+      DB_NAME:    notificationsdb
+      REDIS_URL:  redis://redis:6379
+      PORT:       3005
+    ports: ["3005:3005"]
+    depends_on:
+      - mongodb
+      - redis
+    restart: on-failure
+
+  # ════════════════════════════════════════
+  #  FRONTEND
+  # ════════════════════════════════════════
+
+  frontend:
+    build: ./frontend
+    ports: ["3000:3000"]
+    depends_on:
+      - api-gateway
+    restart: unless-stopped
+
+  # ════════════════════════════════════════
+  #  API GATEWAY  (main entry point → :80)
+  # ════════════════════════════════════════
+
+  api-gateway:
+    build: ./services/api-gateway
+    ports: ["80:80"]
+    depends_on:
+      - auth-service
+      - product-service
+      - order-service
+      - payment-service
+      - notification-service
+      - frontend
+    restart: unless-stopped
+
+volumes:
+  auth_data:
+  orders_data:
+  payments_data:
+  mongo_data:
+  redis_data:

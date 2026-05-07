@@ -1,0 +1,49 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: shopwave
+  labels: { env: dev }
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: monitoring
+---
+apiVersion: v1
+kind: ResourceQuota
+metadata:
+  name: shopwave-quota
+  namespace: shopwave
+spec:
+  hard:
+    requests.cpu: "8"
+    requests.memory: 8Gi
+    limits.cpu: "16"
+    limits.memory: 16Gi
+    pods: "50"
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-internal
+  namespace: shopwave
+spec:
+  podSelector: {}
+  policyTypes: [Ingress, Egress]
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: shopwave
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: shopwave
+    - to: []
+      ports:
+        - { port: 53,    protocol: UDP }
+        - { port: 443,   protocol: TCP }
+        - { port: 5432,  protocol: TCP }
+        - { port: 27017, protocol: TCP }
+        - { port: 6379,  protocol: TCP }

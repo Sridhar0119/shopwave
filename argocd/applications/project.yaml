@@ -1,0 +1,17 @@
+apiVersion: argoproj.io/v1alpha1
+kind: AppProject
+metadata:
+  name: shopwave
+  namespace: argocd
+spec:
+  description: ShopWave e-commerce platform
+  sourceRepos: ["https://github.com/YOUR_ORG/shopwave-gitops.git"]
+  destinations:
+    - namespace: shopwave
+      server: https://kubernetes.default.svc
+    - namespace: monitoring
+      server: https://kubernetes.default.svc
+  clusterResourceWhitelist:
+    - { group: "", kind: Namespace }
+  namespaceResourceWhitelist:
+    - { group: "*", kind: "*" }

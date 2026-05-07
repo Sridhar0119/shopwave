@@ -1,0 +1,22 @@
+---
+# ansible/playbooks/site.yml
+- name: Setup Jenkins + all tools
+  hosts: jenkins
+  become: yes
+  roles: [common, docker, k8s-node]
+  tasks:
+    - name: Start Jenkins container
+      docker_container:
+        name: jenkins
+        image: jenkins/jenkins:lts-jdk17
+        state: started
+        restart_policy: unless-stopped
+        ports: ["8080:8080","50000:50000"]
+        volumes:
+          - /var/jenkins_home:/var/jenkins_home
+          - /var/run/docker.sock:/var/run/docker.sock
+
+- name: Setup app nodes
+  hosts: app_nodes
+  become: yes
+  roles: [common, docker, k8s-node]

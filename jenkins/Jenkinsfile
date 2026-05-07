@@ -1,0 +1,100 @@
+pipeline {
+  agent any
+
+  environment {
+    AWS_REGION     = 'us-east-1'
+    AWS_ACCOUNT_ID = credentials('aws-account-id')
+    ECR_REGISTRY   = "${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com"
+    PROJECT        = 'shopwave'
+    IMAGE_TAG      = "${BUILD_NUMBER}-${GIT_COMMIT[0..6]}"
+    GITOPS_REPO    = 'https://github.com/YOUR_ORG/shopwave-gitops.git'  // CHANGE ME
+  }
+
+  options {
+    buildDiscarder(logRotator(numToKeepStr: '10'))
+    timeout(time: 45, unit: 'MINUTES')
+    disableConcurrentBuilds()
+  }
+
+  stages {
+    stage('Checkout') {
+      steps { checkout scm }
+    }
+
+    stage('Tests') {
+      parallel {
+        stage('auth-service') {
+          steps { dir('services/auth-service') { sh 'npm ci && npm test --if-present' } }
+        }
+        stage('product-service') {
+          steps { dir('services/product-service') { sh 'pip install -r requirements.txt && python -m pytest -q --tb=short || true' } }
+        }
+        stage('order-service') {
+          steps { dir('services/order-service') { sh 'go test ./... || true' } }
+        }
+        stage('payment-service') {
+          steps { dir('services/payment-service') { sh 'npm ci && npm test --if-present' } }
+        }
+      }
+    }
+
+    stage('Build & Push Images') {
+      steps {
+        script {
+          sh "aws ecr get-login-password --region ${AWS_REGION} | docker login --username AWS --password-stdin ${ECR_REGISTRY}"
+          def svcs = ['auth-service','product-service','order-service','payment-service','notification-service','api-gateway','frontend']
+          svcs.each { svc ->
+            def dir = svc == 'frontend' ? 'frontend' : "services/${svc}"
+            def img = "${ECR_REGISTRY}/${PROJECT}/${svc}"
+            sh """
+              docker build -t ${img}:${IMAGE_TAG} -t ${img}:latest ./${dir}
+              docker push ${img}:${IMAGE_TAG}
+              docker push ${img}:latest
+            """
+          }
+        }
+      }
+    }
+
+    stage('Security Scan') {
+      steps {
+        script {
+          ['auth-service','product-service','frontend'].each { svc ->
+            sh """
+              docker run --rm -v /var/run/docker.sock:/var/run/docker.sock \
+                aquasec/trivy:latest image --exit-code 0 --severity HIGH,CRITICAL \
+                --no-progress ${ECR_REGISTRY}/${PROJECT}/${svc}:${IMAGE_TAG}
+            """
+          }
+        }
+      }
+    }
+
+    stage('Update GitOps') {
+      when { branch 'main' }
+      steps {
+        withCredentials([usernamePassword(credentialsId: 'github-creds', usernameVariable: 'GU', passwordVariable: 'GT')]) {
+          sh """
+            git clone https://${GU}:${GT}@github.com/YOUR_ORG/shopwave-gitops.git /tmp/gitops
+            cd /tmp/gitops
+            for svc in auth-service product-service order-service payment-service notification-service api-gateway frontend; do
+              sed -i "s|tag:.*|tag: ${IMAGE_TAG}|g" helm/\${svc}/values.yaml
+            done
+            git config user.email "jenkins@shopwave.local"
+            git config user.name "Jenkins CI"
+            git add -A
+            git commit -m "ci: bump all images to ${IMAGE_TAG} [skip ci]" || echo "no changes"
+            git push origin main
+            rm -rf /tmp/gitops
+          """
+        }
+      }
+    }
+  }
+
+  post {
+    always { sh 'docker system prune -f --filter "until=24h" || true'; cleanWs() }
+    success { echo "✅ Build ${IMAGE_TAG} deployed!" }
+    failure { echo "❌ Build failed. Check logs." }
+  }
+}

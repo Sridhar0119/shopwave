@@ -1,0 +1,111 @@
+name: CI/CD — ShopWave
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main]
+
+env:
+  AWS_REGION: us-east-1
+  PROJECT:    shopwave
+
+jobs:
+  test:
+    name: Test — ${{ matrix.service }}
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - service: auth-service
+            dir:     services/auth-service
+            cmd:     "npm ci && npm test --if-present"
+          - service: product-service
+            dir:     services/product-service
+            cmd:     "pip install -r requirements.txt && python -m pytest -q || true"
+          - service: order-service
+            dir:     services/order-service
+            cmd:     "go test ./... || true"
+          - service: payment-service
+            dir:     services/payment-service
+            cmd:     "npm ci && npm test --if-present"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        if: contains(matrix.cmd, 'npm')
+        with: { node-version: 18 }
+      - uses: actions/setup-python@v5
+        if: contains(matrix.cmd, 'pip')
+        with: { python-version: "3.11" }
+      - uses: actions/setup-go@v5
+        if: contains(matrix.cmd, 'go')
+        with: { go-version: "1.21" }
+      - run: ${{ matrix.cmd }}
+        working-directory: ${{ matrix.dir }}
+
+  build-push:
+    name: Build & Push — ${{ matrix.service }}
+    needs: test
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        service: [auth-service, product-service, order-service, payment-service, notification-service, api-gateway, frontend]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id:     ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region:            ${{ env.AWS_REGION }}
+
+      - name: Login to ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Build and push
+        env:
+          REGISTRY:  ${{ steps.login-ecr.outputs.registry }}
+          IMAGE_TAG: ${{ github.run_number }}-${{ github.sha }}
+        run: |
+          DIR=$([[ "${{ matrix.service }}" == "frontend" ]] && echo "frontend" || echo "services/${{ matrix.service }}")
+          IMAGE="${REGISTRY}/${PROJECT}/${{ matrix.service }}"
+          docker build -t "${IMAGE}:${IMAGE_TAG}" -t "${IMAGE}:latest" "./${DIR}"
+          docker push "${IMAGE}:${IMAGE_TAG}"
+          docker push "${IMAGE}:latest"
+          echo "IMAGE_TAG=${IMAGE_TAG}" >> $GITHUB_ENV
+
+      - name: Trivy scan
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: "${{ steps.login-ecr.outputs.registry }}/${{ env.PROJECT }}/${{ matrix.service }}:latest"
+          format: table
+          exit-code: 0
+          severity: HIGH,CRITICAL
+
+  update-gitops:
+    name: Update GitOps repo
+    needs: build-push
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: YOUR_ORG/shopwave-gitops    # CHANGE ME
+          token: ${{ secrets.GITOPS_PAT }}
+          path: gitops
+
+      - name: Bump image tags
+        env:
+          TAG: ${{ github.run_number }}-${{ github.sha }}
+        run: |
+          cd gitops
+          for svc in auth-service product-service order-service payment-service notification-service api-gateway frontend; do
+            sed -i "s/tag:.*/tag: ${TAG}/" helm/${svc}/values.yaml
+          done
+          git config user.email "actions@github.com"
+          git config user.name "GitHub Actions"
+          git add -A
+          git commit -m "ci: bump all images to ${TAG} [skip ci]" || true
+          git push

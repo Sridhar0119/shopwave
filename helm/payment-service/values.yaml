@@ -1,0 +1,16 @@
+replicaCount: 2
+image:
+  repository: YOUR_AWS_ACCOUNT.dkr.ecr.us-east-1.amazonaws.com/shopwave/payment-service
+  tag: latest
+  pullPolicy: IfNotPresent
+service:
+  type: ClusterIP
+  port: 3004
+resources:
+  requests: { cpu: 100m, memory: 128Mi }
+  limits:   { cpu: 500m, memory: 512Mi }
+autoscaling:
+  enabled: true
+  minReplicas: 2
+  maxReplicas: 8
+  targetCPUUtilizationPercentage: 70

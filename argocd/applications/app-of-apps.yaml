@@ -1,0 +1,23 @@
+---
+# app-of-apps.yaml — bootstrap all services via ArgoCD
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: shopwave-apps
+  namespace: argocd
+  finalizers: [resources-finalizer.argocd.argoproj.io]
+spec:
+  project: shopwave
+  source:
+    repoURL: https://github.com/YOUR_ORG/shopwave-gitops.git   # CHANGE ME
+    targetRevision: main
+    path: argocd/applications
+    directory:
+      recurse: false
+      exclude: "app-of-apps.yaml"
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: argocd
+  syncPolicy:
+    automated: { prune: true, selfHeal: true }
+    syncOptions: [CreateNamespace=true]
